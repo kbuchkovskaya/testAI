@@ -1,0 +1,28 @@
+name: SFDC Connectivity Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  sfdc-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run Salesforce connectivity test
+        env:
+          SFDC_TOKEN_URL: ${{ secrets.SFDC_TOKEN_URL }}
+          SFDC_CLIENT_ID: ${{ secrets.SFDC_CLIENT_ID }}
+          SFDC_CLIENT_SECRET: ${{ secrets.SFDC_CLIENT_SECRET }}
+        run: node test_sfdc.js

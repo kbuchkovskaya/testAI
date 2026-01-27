@@ -1,0 +1,76 @@
+name: MCP Smoke Test (start server & call tools)
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  mcp-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Start MCP server in background
+        env:
+          SFDC_TOKEN_URL: ${{ secrets.SFDC_TOKEN_URL }}
+          SFDC_CLIENT_ID: ${{ secrets.SFDC_CLIENT_ID }}
+          SFDC_CLIENT_SECRET: ${{ secrets.SFDC_CLIENT_SECRET }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+        run: |
+          # start server in background; redirect logs to file
+          node server.js > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for server to be ready
+        run: |
+          # Poll /mcp via a minimal JSON-RPC list call until we get a response
+          for i in {1..30}; do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Accept: application/json, text/event-stream" \
+              -H "Content-Type: application/json" \
+              -H "x-api-key: ${{ secrets.MCP_API_KEY }}" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+              http://localhost:3000/mcp || true)
+            if [ "$HTTP" != "000" ]; then
+              echo "server responded with HTTP $HTTP"
+              break
+            fi
+            echo "waiting for server..."
+            sleep 2
+          done
+          # show last logs for debugging
+          tail -n +1 server.log | sed -n '1,200p'
+
+      - name: Call tools/list for verification
+        run: |
+          curl -N -s -X POST http://localhost:3000/mcp \
+            -H "Accept: application/json, text/event-stream" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.MCP_API_KEY }}" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | sed -n '1,200p'
+
+      - name: Call soql_query via MCP
+        run: |
+          curl -N -s -X POST http://localhost:3000/mcp \
+            -H "Accept: application/json, text/event-stream" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.MCP_API_KEY }}" \
+            -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"soql_query","arguments":{"soql":"SELECT Id, Name FROM Account LIMIT 1"}}}' | sed -n '1,200p'
+
+      - name: Stop server
+        if: always()
+        run: |
+          kill $(cat server.pid) || true
