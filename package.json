@@ -1,0 +1,21 @@
+{
+  "name": "sfdc-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "express-mcp-handler": "^0.3.0",
+    "jsforce": "^3.10.10",
+    "zod": "^4.3.4"
+  }
+}
