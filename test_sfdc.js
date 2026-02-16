@@ -20,7 +20,7 @@ async function main() {
   const id = await conn.identity();
   console.log("IDENTITY OK:", id.user_id, id.organization_id);
 
-  const res = await conn.query("SELECT Id, Name FROM Account LIMIT 1");
+  const res = await conn.query("SELECT Id, Name FROM Account");
   console.log("SOQL OK:", res.records);
 }
 

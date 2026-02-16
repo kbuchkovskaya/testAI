@@ -1,7 +1,4 @@
 import "dotenv/config";
-console.log("SFDC_TOKEN_URL set:", process.env.SFDC_TOKEN_URL);
-console.log("SFDC_CLIENT_ID set:", !!process.env.SFDC_CLIENT_ID);
-console.log("SFDC_CLIENT_SECRET set:", !!process.env.SFDC_CLIENT_SECRET);
 import express from "express";
 import jsforce from "jsforce";
 import { z } from "zod";
@@ -69,6 +66,43 @@ function serverFactory() {
       const conn = await getConn();     // uses your token flow
       const id = await conn.identity(); // calls Salesforce identity endpoint
       return { content: [{ type: "text", text: JSON.stringify(id, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "create_case",
+    "Create a new Salesforce Case (safe subset of fields)",
+    {
+      subject: z.string().min(1).max(255),
+      description: z.string().max(32000).optional(),
+      origin: z.enum(["Phone", "Email", "Web", "Chat", "Other"]).optional(),
+      priority: z.enum(["Low", "Medium", "High"]).optional(),
+      status: z.string().optional(), // optional, only if you want to set it
+    },
+    async ({ subject, description, origin, priority, status }) => {
+      const conn = await getConn();
+
+      const fields = {
+        Subject: subject,
+        ...(description ? { Description: description } : {}),
+        ...(origin ? { Origin: origin } : {}),
+        ...(priority ? { Priority: priority } : {}),
+        ...(status ? { Status: status } : {}),
+      };
+
+      const result = await conn.sobject("Case").create(fields);
+
+      if (!result?.success) {
+        const err = Array.isArray(result?.errors) ? result.errors.join("; ") : JSON.stringify(result?.errors);
+        return {
+          content: [{ type: "text", text: `Failed to create Case: ${err || "Unknown error"}` }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify({ id: result.id, success: true }, null, 2) }],
+      };
     }
   );
 
