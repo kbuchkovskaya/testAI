@@ -71,16 +71,46 @@ function serverFactory() {
 
   server.tool(
     "create_case",
-    "Create a new Salesforce Case (safe subset of fields)",
+    "Create a new Salesforce Case and optionally relate it to an Account",
     {
       subject: z.string().min(1).max(255),
       description: z.string().max(32000).optional(),
       origin: z.enum(["Phone", "Email", "Web", "Chat", "Other"]).optional(),
       priority: z.enum(["Low", "Medium", "High"]).optional(),
-      status: z.string().optional(), // optional, only if you want to set it
+      status: z.string().optional(),
+
+      // NEW: relate to Account
+      accountId: z.string().min(10).optional(),
+      accountName: z.string().min(1).max(255).optional(),
     },
-    async ({ subject, description, origin, priority, status }) => {
+    async ({ subject, description, origin, priority, status, accountId, accountName }) => {
       const conn = await getConn();
+
+      // Safety: require only one of accountId / accountName (or none)
+      if (accountId && accountName) {
+        return {
+          content: [{ type: "text", text: "Provide either accountId OR accountName, not both." }],
+          isError: true,
+        };
+      }
+
+      let resolvedAccountId = accountId;
+
+      // If accountName is provided, look up the Account Id
+      if (!resolvedAccountId && accountName) {
+        // Escape single quotes for SOQL
+        const safeName = accountName.replace(/'/g, "\\'");
+        const q = await conn.query(`SELECT Id, Name FROM Account WHERE Name = '${safeName}' ORDER BY CreatedDate DESC LIMIT 1`);
+
+        if (!q.records?.length) {
+          return {
+            content: [{ type: "text", text: `Account not found by name: "${accountName}". Provide accountId or create the Account first.` }],
+            isError: true,
+          };
+        }
+
+        resolvedAccountId = q.records[0].Id;
+      }
 
       const fields = {
         Subject: subject,
@@ -88,6 +118,7 @@ function serverFactory() {
         ...(origin ? { Origin: origin } : {}),
         ...(priority ? { Priority: priority } : {}),
         ...(status ? { Status: status } : {}),
+        ...(resolvedAccountId ? { AccountId: resolvedAccountId } : {}),
       };
 
       const result = await conn.sobject("Case").create(fields);
@@ -101,7 +132,86 @@ function serverFactory() {
       }
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ id: result.id, success: true }, null, 2) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ id: result.id, success: true, accountId: resolvedAccountId || null }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    "list_cases_for_account",
+    "List recent Cases for a given AccountId",
+    {
+      accountId: z.string().min(10),
+      limit: z.number().int().min(1).max(20).optional(),
+    },
+    async ({ accountId, limit }) => {
+      const conn = await getConn();
+      const lim = limit ?? 10;
+
+      const res = await conn.query(
+        `SELECT Id, CaseNumber, Subject, Status, Priority, CreatedDate
+        FROM Case
+        WHERE AccountId = '${accountId.replace(/'/g, "\\'")}'
+        ORDER BY CreatedDate DESC
+        LIMIT ${lim}`
+      );
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(res.records ?? [], null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "update_case",
+    "Update an existing Case (allow-listed fields only)",
+    {
+      caseId: z.string().min(10),
+
+      // allow-listed editable fields
+      subject: z.string().min(1).max(255).optional(),
+      description: z.string().max(32000).optional(),
+      status: z.string().min(1).max(255).optional(),
+      priority: z.enum(["Low", "Medium", "High"]).optional(),
+      origin: z.enum(["Phone", "Email", "Web", "Chat", "Other"]).optional(),
+    },
+    async ({ caseId, subject, description, status, priority, origin }) => {
+      const conn = await getConn();
+
+      const updates = {
+        Id: caseId,
+        ...(subject ? { Subject: subject } : {}),
+        ...(description ? { Description: description } : {}),
+        ...(status ? { Status: status } : {}),
+        ...(priority ? { Priority: priority } : {}),
+        ...(origin ? { Origin: origin } : {}),
+      };
+
+      // Prevent empty update calls
+      if (Object.keys(updates).length === 1) {
+        return {
+          content: [{ type: "text", text: "No fields provided to update." }],
+          isError: true,
+        };
+      }
+
+      const result = await conn.sobject("Case").update(updates);
+
+      if (!result?.success) {
+        const err = Array.isArray(result?.errors) ? result.errors.join("; ") : JSON.stringify(result?.errors);
+        return {
+          content: [{ type: "text", text: `Failed to update Case: ${err || "Unknown error"}` }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify({ id: caseId, success: true, updated: Object.keys(updates).filter(k => k !== "Id") }, null, 2) }],
       };
     }
   );
