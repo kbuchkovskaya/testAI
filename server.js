@@ -216,6 +216,43 @@ function serverFactory() {
     }
   );
 
+  server.tool(
+    "delete_case",
+    "Delete a Case by Id (soft delete / moves to Recycle Bin)",
+    {
+      caseId: z.string().min(10),
+      // Optional safety guard: require explicit confirmation text
+      confirm: z.literal("DELETE").optional(),
+    },
+    async ({ caseId, confirm }) => {
+      // Safety guard: uncomment to require confirmation
+      // if (confirm !== "DELETE") {
+      //   return {
+      //     content: [{ type: "text", text: 'Missing confirmation. Pass confirm="DELETE" to proceed.' }],
+      //     isError: true,
+      //   };
+      // }
+
+      const conn = await getConn();
+
+      // jsforce: destroy() performs a delete (soft delete in Salesforce)
+      const result = await conn.sobject("Case").destroy(caseId);
+
+      if (!result?.success) {
+        const err = Array.isArray(result?.errors) ? result.errors.join("; ") : JSON.stringify(result?.errors);
+        return {
+          content: [{ type: "text", text: `Failed to delete Case: ${err || "Unknown error"}` }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify({ id: caseId, deleted: true }, null, 2) }],
+      };
+    }
+  );
+
+
   return server;
 
 }
